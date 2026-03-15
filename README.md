@@ -31,7 +31,7 @@ Steuerung über jeden Browser im lokalen Netzwerk – optimiert für Desktop und
 ### Voraussetzungen
 
 - [PlatformIO](https://platformio.org/) (VS Code Extension oder CLI)
-- ESP32 Dev Board
+- ESP32 Dev Board – [exaktes Board bei Amazon bestellen](https://amzn.to/4uww4y2)
 
 ### Repository klonen
 
