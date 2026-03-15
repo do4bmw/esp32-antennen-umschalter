@@ -1,3 +1,6 @@
+// Copyright (c) 2026 do4bmw – MIT License
+// https://github.com/do4bmw/esp32-antennen-umschalter
+
 #include <Arduino.h>
 #include <WiFi.h>
 #include <WebServer.h>
@@ -62,6 +65,11 @@ static const char HTML_MAIN[] PROGMEM =
     "<button class='b off' id='b0' onclick='sw(0)'>AUS</button>"
     "</div>"
     "<a class='cfg' href='/settings'>&#9881; Einstellungen</a>"
+    "<footer style='margin-top:24px;font-size:.75em;color:#444'>"
+    "&#169; 2026 do4bmw &ndash; "
+    "<a href='https://github.com/do4bmw/esp32-antennen-umschalter' "
+    "style='color:#555;text-decoration:none'>MIT License</a>"
+    "</footer>"
     "<script>"
     "function sw(n){"
       "fetch('/switch?ant='+n).then(r=>r.json()).then(d=>upd(d.ant));"
@@ -108,6 +116,11 @@ static const char HTML_SETTINGS[] PROGMEM =
     "<button class='btn' onclick='save()'>Speichern</button>"
     "<div id='msg'></div>"
     "<a class='back' href='/'>&#8592; Zurück</a>"
+    "<footer style='margin-top:24px;font-size:.75em;color:#444'>"
+    "&#169; 2026 do4bmw &ndash; "
+    "<a href='https://github.com/do4bmw/esp32-antennen-umschalter' "
+    "style='color:#555;text-decoration:none'>MIT License</a>"
+    "</footer>"
     "<script>"
     "fetch('/state').then(r=>r.json()).then(function(d){"
       "d.n.forEach(function(nm,i){document.getElementById('n'+(i+1)).value=nm;});"
