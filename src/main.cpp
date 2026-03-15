@@ -309,6 +309,7 @@ void setup() {
 
     // WLAN verbinden (max. 30 s)
     WiFi.mode(WIFI_STA);
+    WiFi.setHostname(mdnsName);   // DHCP-Hostname = mDNS-Name (wirkt beim nächsten Reconnect)
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
     Serial.print("Verbinde mit WiFi");
     const uint32_t t0 = millis();
