@@ -83,21 +83,23 @@ Aufruf: `http://do4bmw-ant.local` oder per IP-Adresse (wird beim Start seriell a
 Vier Buttons schalten die Antennen, ein AUS-Button öffnet alle Relais.
 Der aktiv geschaltete Button wird farblich hervorgehoben.
 
-### Einstellungen – Antennennamen und mDNS anpassen
+### Einstellungen – Antennennamen, mDNS und WLAN
 
 Aufruf: `http://do4bmw-ant.local/settings`
 
-Die Namen der vier Antennentasten können frei vergeben werden (max. 20 Zeichen), z.B.:
+**Antennennamen** frei vergeben (max. 20 Zeichen), z.B.:
 
 - Antenne 1 → `Yagi 40m`
 - Antenne 2 → `Dipol 80m`
 - Antenne 3 → `Vertikal`
 - Antenne 4 → `Beam 10m`
 
-Zusätzlich kann der **mDNS-Hostname** (max. 32 Zeichen, nur Buchstaben, Zahlen und Bindestriche) frei vergeben werden.
-Das Board ist danach sofort unter dem neuen Namen erreichbar – ohne Neustart.
+**mDNS-Hostname** (max. 32 Zeichen, nur Buchstaben, Zahlen, Bindestriche) — Änderung sofort aktiv ohne Neustart.
 
-> Beispiel: Name `mein-esp` → Adresse `http://mein-esp.local`
+**WLAN-Zugangsdaten** (SSID + Passwort) direkt über die Weboberfläche ändern — kein Reflashing nötig.
+Das Passwort-Feld leer lassen um das bestehende Passwort beizubehalten.
+
+> ⚠️ **Wichtig:** Bei falschen WLAN-Zugangsdaten startet der ESP32 automatisch einen Notfall-Hotspot: SSID `do4bmw-ant-setup` (offen), IP `192.168.4.1`. Dort `/settings` aufrufen und korrigieren.
 
 Nach dem Speichern werden alle Einstellungen dauerhaft im **NVS (Non-Volatile Storage)** des ESP32 abgelegt und beim nächsten Start automatisch wiederhergestellt.
 
@@ -111,6 +113,7 @@ Der ESP32 speichert folgende Daten dauerhaft im internen Flash (NVS):
 |--------------------------|---------------------------------------------------|
 | Antennennamen (n1–n4)    | Frei vergebene Button-Bezeichnungen                       |
 | mDNS-Hostname            | Frei wählbarer `.local`-Name im Netzwerk                  |
+| WLAN SSID + Passwort     | Änderbar ohne Reflashing, Fallback auf `secrets.ini`      |
 | Zuletzt aktives Relais   | Nach Neustart wird automatisch dasselbe Relais geschaltet |
 
 Das bedeutet: Fällt die Stromversorgung aus oder wird der ESP32 neu gestartet, schaltet er beim Hochfahren sofort wieder auf die zuletzt aktive Antenne – ohne manuellen Eingriff.

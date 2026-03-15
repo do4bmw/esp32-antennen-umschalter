@@ -7,7 +7,7 @@
 #include <ESPmDNS.h>
 #include <Preferences.h>
 
-// WiFi-Zugangsdaten kommen aus secrets.ini via Build-Flags
+// Compile-Zeit-Defaults aus secrets.ini (Fallback falls NVS leer)
 #ifndef WIFI_SSID
   #define WIFI_SSID     "SSID_FEHLT"
 #endif
@@ -20,10 +20,13 @@ static const uint8_t RELAY_PINS[4] = {32, 33, 25, 26};
 static const uint8_t LED_ACT_PIN    = 23;
 
 // ── Globaler Zustand ──────────────────────────────────────────
-volatile int8_t  activeAntenna  = 0;
-volatile uint32_t lastRequestMs = 0;  // Zeitstempel letzter HTTP-Request
+volatile int8_t  activeAntenna     = 0;
+volatile uint32_t lastRequestMs    = 0;
 char antNames[4][21];   // 4 Namen, max. 20 Zeichen + '\0'
 char mdnsName[33];      // mDNS-Hostname, max. 32 Zeichen + '\0'
+char wifiSSID[33];      // WLAN-SSID, max. 32 Zeichen + '\0'
+char wifiPass[65];      // WLAN-Passwort, max. 64 Zeichen + '\0'
+bool wifiReconnectPending = false;
 
 Preferences prefs;
 WebServer server(80);
@@ -100,7 +103,9 @@ static const char HTML_SETTINGS[] PROGMEM =
     "<style>"
     "body{font-family:sans-serif;text-align:center;background:#111;color:#eee;padding:20px;margin:0}"
     "h1{color:#4af;margin-bottom:20px}"
+    "h2{color:#4af;font-size:1em;margin:0 0 10px}"
     ".row{margin:10px auto;width:220px;text-align:left}"
+    ".sep{border-top:1px solid #333;margin:22px auto;width:220px}"
     "label{display:block;margin-bottom:4px;color:#aaa;font-size:.9em}"
     "input{width:100%;box-sizing:border-box;padding:10px;border:2px solid #4af;"
     "border-radius:8px;background:#222;color:#eee;font-size:1em}"
@@ -108,21 +113,41 @@ static const char HTML_SETTINGS[] PROGMEM =
     "border:none;border-radius:8px;font-size:1.1em;cursor:pointer;font-weight:bold}"
     ".btn:hover{background:#7cf}"
     ".back{display:block;margin-top:16px;color:#4af;text-decoration:none}"
+    ".warn{color:#f84;font-size:.8em;display:block;width:220px;margin:6px auto 0;text-align:left}"
     "#msg{margin-top:12px;min-height:1.2em;color:#4f4}"
     "</style></head><body>"
     "<h1>&#9881; Einstellungen</h1>"
+
+    // Antennennamen
+    "<h2>Antennennamen</h2>"
     "<div class='row'><label>Antenne 1</label><input id='n1' maxlength='20'></div>"
     "<div class='row'><label>Antenne 2</label><input id='n2' maxlength='20'></div>"
     "<div class='row'><label>Antenne 3</label><input id='n3' maxlength='20'></div>"
     "<div class='row'><label>Antenne 4</label><input id='n4' maxlength='20'></div>"
-    "<div class='row' style='margin-top:20px'>"
+
+    // mDNS
+    "<div class='sep'></div>"
+    "<h2>Netzwerk</h2>"
+    "<div class='row'>"
     "<label>mDNS-Name <span style='color:#666;font-size:.85em'>(.local)</span></label>"
     "<input id='mdns' maxlength='32' placeholder='do4bmw-ant'>"
-    "<small style='color:#666;display:block;margin-top:4px'>"
-    "Nur Buchstaben, Zahlen und Bindestriche</small></div>"
+    "<small style='color:#666;display:block;margin-top:4px'>Nur Buchstaben, Zahlen, Bindestriche</small>"
+    "</div>"
+
+    // WiFi
+    "<div class='sep'></div>"
+    "<h2>WLAN</h2>"
+    "<div class='row'><label>SSID</label><input id='wssid' maxlength='32'></div>"
+    "<div class='row'>"
+    "<label>Passwort</label>"
+    "<input id='wpass' type='password' maxlength='64' placeholder='leer lassen = unver&#228;ndert'>"
+    "</div>"
+    "<span class='warn'>&#9888; Falsche Zugangsdaten: ESP32 startet AP-Modus<br>"
+    "SSID: &lt;name&gt;-setup &nbsp; IP: 192.168.4.1</span>"
+
     "<button class='btn' onclick='save()'>Speichern</button>"
     "<div id='msg'></div>"
-    "<a class='back' href='/'>&#8592; Zurück</a>"
+    "<a class='back' href='/'>&#8592; Zur&#252;ck</a>"
     "<footer style='margin-top:24px;font-size:.75em;color:#444'>"
     "&#169; 2026 do4bmw &ndash; "
     "<a href='https://github.com/do4bmw/esp32-antennen-umschalter' "
@@ -132,17 +157,27 @@ static const char HTML_SETTINGS[] PROGMEM =
     "fetch('/state').then(r=>r.json()).then(function(d){"
       "d.n.forEach(function(nm,i){document.getElementById('n'+(i+1)).value=nm;});"
       "document.getElementById('mdns').value=d.mdns||'';"
+      "document.getElementById('wssid').value=d.wssid||'';"
     "});"
     "function save(){"
       "var b='n1='+encodeURIComponent(document.getElementById('n1').value)"
           "+'&n2='+encodeURIComponent(document.getElementById('n2').value)"
           "+'&n3='+encodeURIComponent(document.getElementById('n3').value)"
           "+'&n4='+encodeURIComponent(document.getElementById('n4').value)"
-          "+'&mdns='+encodeURIComponent(document.getElementById('mdns').value);"
+          "+'&mdns='+encodeURIComponent(document.getElementById('mdns').value)"
+          "+'&wssid='+encodeURIComponent(document.getElementById('wssid').value)"
+          "+'&wpass='+encodeURIComponent(document.getElementById('wpass').value);"
       "fetch('/settings',{method:'POST',"
         "headers:{'Content-Type':'application/x-www-form-urlencoded'},body:b})"
       ".then(r=>r.json()).then(function(d){"
-        "document.getElementById('msg').textContent=d.ok?'\\u2713 Gespeichert!':'Fehler';"
+        "if(d.wifi){"
+          "document.getElementById('msg').style.color='#fa4';"
+          "document.getElementById('msg').textContent="
+            "'\\u2713 Gespeichert \\u2013 ESP32 verbindet neu...';"
+        "}else{"
+          "document.getElementById('msg').style.color='#4f4';"
+          "document.getElementById('msg').textContent='\\u2713 Gespeichert!';"
+        "}"
       "});"
     "}"
     "</script>"
@@ -155,14 +190,16 @@ static void loadSettings() {
         char def[21];
         snprintf(def, sizeof(def), "Antenne %d", i + 1);
         prefs.getString(key, antNames[i], sizeof(antNames[i]));
-        if (antNames[i][0] == '\0') {
-            strlcpy(antNames[i], def, sizeof(antNames[i]));
-        }
+        if (antNames[i][0] == '\0') strlcpy(antNames[i], def, sizeof(antNames[i]));
     }
     prefs.getString("mdns", mdnsName, sizeof(mdnsName));
-    if (mdnsName[0] == '\0') {
-        strlcpy(mdnsName, "do4bmw-ant", sizeof(mdnsName));
-    }
+    if (mdnsName[0] == '\0') strlcpy(mdnsName, "do4bmw-ant", sizeof(mdnsName));
+
+    prefs.getString("wssid", wifiSSID, sizeof(wifiSSID));
+    if (wifiSSID[0] == '\0') strlcpy(wifiSSID, WIFI_SSID, sizeof(wifiSSID));
+
+    prefs.getString("wpass", wifiPass, sizeof(wifiPass));
+    if (wifiPass[0] == '\0') strlcpy(wifiPass, WIFI_PASSWORD, sizeof(wifiPass));
 }
 
 // ── NVS: Antennennamen speichern ──────────────────────────────
@@ -171,6 +208,30 @@ static void saveNames() {
         char key[3] = {'n', (char)('1' + i), '\0'};
         prefs.putString(key, antNames[i]);
     }
+}
+
+// ── WiFi verbinden (STA-Modus, max. 15 s) ────────────────────
+static bool connectWifi() {
+    WiFi.disconnect(true);
+    delay(200);
+    WiFi.mode(WIFI_STA);
+    WiFi.setHostname(mdnsName);
+    WiFi.begin(wifiSSID, wifiPass);
+    const uint32_t t0 = millis();
+    while (WiFi.status() != WL_CONNECTED && (millis() - t0) < 15000UL) {
+        delay(500);
+        Serial.print('.');
+    }
+    return WiFi.status() == WL_CONNECTED;
+}
+
+// ── AP-Fallback starten ───────────────────────────────────────
+static void startAPMode() {
+    char apSSID[40];
+    snprintf(apSSID, sizeof(apSSID), "%s-setup", mdnsName);
+    WiFi.softAP(apSSID);    // offenes Netz, nur für Notfall-Setup
+    Serial.printf("\n[AP] SSID: %s\n[AP] IP:   192.168.4.1\n", apSSID);
+    Serial.println("[AP] http://192.168.4.1/settings aufrufen um WLAN zu konfigurieren");
 }
 
 // ── Relais-Steuerung ──────────────────────────────────────────
@@ -183,7 +244,7 @@ static void applyRelay(int8_t ant) {
 static void setAntenna(int8_t ant) {
     applyRelay(ant);
     activeAntenna = ant;
-    prefs.putChar("active", ant);   // dauerhaft speichern
+    prefs.putChar("active", ant);
     if (ant == 0) {
         Serial.println("[Relais] AUS – alle Relais offen");
     } else {
@@ -201,14 +262,15 @@ void handleRoot() {
     server.send_P(200, "text/html; charset=utf-8", HTML_MAIN);
 }
 
-// ── HTTP-Handler: Zustand + Namen + mDNS ─────────────────────
+// ── HTTP-Handler: Zustand ─────────────────────────────────────
 void handleState() {
     actPulse();
-    char buf[220];
+    char buf[260];
     snprintf(buf, sizeof(buf),
-        "{\"ant\":%d,\"n\":[\"%s\",\"%s\",\"%s\",\"%s\"],\"mdns\":\"%s\"}",
+        "{\"ant\":%d,\"n\":[\"%s\",\"%s\",\"%s\",\"%s\"],\"mdns\":\"%s\",\"wssid\":\"%s\"}",
         activeAntenna,
-        antNames[0], antNames[1], antNames[2], antNames[3], mdnsName);
+        antNames[0], antNames[1], antNames[2], antNames[3],
+        mdnsName, wifiSSID);
     server.send(200, "application/json", buf);
 }
 
@@ -217,9 +279,7 @@ void handleSwitch() {
     actPulse();
     if (server.hasArg("ant")) {
         int val = server.arg("ant").toInt();
-        if (val >= 0 && val <= 4) {
-            setAntenna((int8_t)val);
-        }
+        if (val >= 0 && val <= 4) setAntenna((int8_t)val);
     }
     char buf[12];
     snprintf(buf, sizeof(buf), "{\"ant\":%d}", activeAntenna);
@@ -235,23 +295,24 @@ void handleSettings() {
 // ── HTTP-Handler: Einstellungen speichern (POST) ──────────────
 void handleSettingsSave() {
     actPulse();
-    bool changed = false;
+
+    // Antennennamen
+    bool namesChanged = false;
     for (int i = 0; i < 4; i++) {
         char key[3] = {'n', (char)('1' + i), '\0'};
         if (server.hasArg(key)) {
             String val = server.arg(key);
             val.trim();
-            if (val.length() == 0) {
-                snprintf(antNames[i], sizeof(antNames[i]), "Antenne %d", i + 1);
-            } else {
-                strlcpy(antNames[i], val.c_str(), sizeof(antNames[i]));
-            }
-            changed = true;
+            strlcpy(antNames[i], val.length() > 0
+                ? val.c_str()
+                : (snprintf(antNames[i], sizeof(antNames[i]), "Antenne %d", i+1), antNames[i]),
+                sizeof(antNames[i]));
+            namesChanged = true;
         }
     }
-    if (changed) saveNames();
+    if (namesChanged) saveNames();
 
-    // mDNS-Name speichern und sofort neu starten
+    // mDNS-Name
     if (server.hasArg("mdns")) {
         String val = server.arg("mdns");
         val.trim();
@@ -266,7 +327,32 @@ void handleSettingsSave() {
         }
     }
 
-    server.send(200, "application/json", "{\"ok\":true}");
+    // WLAN-Zugangsdaten
+    bool wifiChanged = false;
+    if (server.hasArg("wssid")) {
+        String val = server.arg("wssid");
+        val.trim();
+        if (val.length() > 0 && val.length() <= 32) {
+            strlcpy(wifiSSID, val.c_str(), sizeof(wifiSSID));
+            prefs.putString("wssid", wifiSSID);
+            wifiChanged = true;
+        }
+    }
+    if (server.hasArg("wpass") && server.arg("wpass").length() > 0) {
+        String val = server.arg("wpass");
+        strlcpy(wifiPass, val.c_str(), sizeof(wifiPass));
+        prefs.putString("wpass", wifiPass);
+        wifiChanged = true;
+    }
+    if (wifiChanged) {
+        wifiReconnectPending = true;
+        Serial.printf("[WiFi] Neue Zugangsdaten gespeichert, SSID: %s\n", wifiSSID);
+    }
+
+    char resp[40];
+    snprintf(resp, sizeof(resp), "{\"ok\":true,\"wifi\":%s}",
+             wifiChanged ? "true" : "false");
+    server.send(200, "application/json", resp);
 }
 
 // ── FreeRTOS-Task: Aktivitäts-LED (150 ms Puls pro Request) ───
@@ -290,44 +376,31 @@ static void relayTask(void* /*param*/) {
 void setup() {
     Serial.begin(115200);
 
-    // Alle Relais als Ausgang, initial AUS
     for (int i = 0; i < 4; i++) {
         pinMode(RELAY_PINS[i], OUTPUT);
         digitalWrite(RELAY_PINS[i], LOW);
     }
-
-    // WiFi-Status-LED
     pinMode(LED_ACT_PIN, OUTPUT);
     digitalWrite(LED_ACT_PIN, LOW);
 
-    // NVS öffnen und gespeicherte Werte laden
+    // NVS laden
     prefs.begin("ant", false);
     loadSettings();
     int8_t lastAnt = prefs.getChar("active", 1);
     Serial.printf("[NVS] Letzte Antenne: %d\n", lastAnt);
-    for (int i = 0; i < 4; i++) {
-        Serial.printf("[NVS] Name %d: %s\n", i + 1, antNames[i]);
-    }
-    Serial.printf("[NVS] mDNS-Name: %s\n", mdnsName);
+    for (int i = 0; i < 4; i++) Serial.printf("[NVS] Name %d: %s\n", i+1, antNames[i]);
+    Serial.printf("[NVS] mDNS: %s  SSID: %s\n", mdnsName, wifiSSID);
 
-    // WLAN verbinden (max. 30 s)
-    WiFi.mode(WIFI_STA);
-    WiFi.setHostname(mdnsName);   // DHCP-Hostname = mDNS-Name (wirkt beim nächsten Reconnect)
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    // WLAN verbinden
     Serial.print("Verbinde mit WiFi");
-    const uint32_t t0 = millis();
-    while (WiFi.status() != WL_CONNECTED && (millis() - t0) < 30000UL) {
-        vTaskDelay(pdMS_TO_TICKS(500));
-        Serial.print('.');
-    }
-    if (WiFi.status() == WL_CONNECTED) {
+    if (connectWifi()) {
         Serial.printf("\nIP: %s\n", WiFi.localIP().toString().c_str());
         if (MDNS.begin(mdnsName)) {
             MDNS.addService("http", "tcp", 80);
             Serial.printf("mDNS: http://%s.local\n", mdnsName);
         }
     } else {
-        Serial.println("\nWiFi-Verbindung fehlgeschlagen – prüfe secrets.ini!");
+        startAPMode();
     }
 
     // Letzte Antenne wiederherstellen
@@ -336,7 +409,6 @@ void setup() {
     Serial.printf("[Relais] Wiederhergestellt: %s\n",
                   lastAnt == 0 ? "AUS" : antNames[lastAnt - 1]);
 
-    // HTTP-Routen registrieren und Server starten
     server.on("/",        HTTP_GET,  handleRoot);
     server.on("/state",   HTTP_GET,  handleState);
     server.on("/switch",  HTTP_GET,  handleSwitch);
@@ -345,11 +417,23 @@ void setup() {
     server.begin();
     Serial.println("HTTP-Server gestartet");
 
-    xTaskCreatePinnedToCore(relayTask,   "relayTask",   2048, nullptr, 1, nullptr, 1);
-    xTaskCreatePinnedToCore(actLedTask,  "actLedTask",  2048, nullptr, 1, nullptr, 1);
+    xTaskCreatePinnedToCore(relayTask,  "relayTask",  2048, nullptr, 1, nullptr, 1);
+    xTaskCreatePinnedToCore(actLedTask, "actLedTask", 2048, nullptr, 1, nullptr, 1);
 }
 
 // ── Loop ──────────────────────────────────────────────────────
 void loop() {
     server.handleClient();
+
+    if (wifiReconnectPending) {
+        wifiReconnectPending = false;
+        Serial.print("[WiFi] Verbinde neu");
+        if (connectWifi()) {
+            Serial.printf("\n[WiFi] Verbunden, IP: %s\n", WiFi.localIP().toString().c_str());
+            MDNS.end();
+            if (MDNS.begin(mdnsName)) MDNS.addService("http", "tcp", 80);
+        } else {
+            startAPMode();
+        }
+    }
 }
