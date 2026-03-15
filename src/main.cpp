@@ -17,10 +17,11 @@
 
 // ── Hardware ──────────────────────────────────────────────────
 static const uint8_t RELAY_PINS[4] = {32, 33, 25, 26};
-static const uint8_t LED_WIFI_PIN   = 23;
+static const uint8_t LED_ACT_PIN    = 23;
 
 // ── Globaler Zustand ──────────────────────────────────────────
-volatile int8_t activeAntenna = 0;
+volatile int8_t  activeAntenna  = 0;
+volatile uint32_t lastRequestMs = 0;  // Zeitstempel letzter HTTP-Request
 char antNames[4][21];   // 4 Namen, max. 20 Zeichen + '\0'
 char mdnsName[33];      // mDNS-Hostname, max. 32 Zeichen + '\0'
 
@@ -191,13 +192,18 @@ static void setAntenna(int8_t ant) {
     }
 }
 
+// ── Aktivitäts-Pulse für LED ──────────────────────────────────
+static inline void actPulse() { lastRequestMs = millis(); }
+
 // ── HTTP-Handler: Hauptseite ──────────────────────────────────
 void handleRoot() {
+    actPulse();
     server.send_P(200, "text/html; charset=utf-8", HTML_MAIN);
 }
 
 // ── HTTP-Handler: Zustand + Namen + mDNS ─────────────────────
 void handleState() {
+    actPulse();
     char buf[220];
     snprintf(buf, sizeof(buf),
         "{\"ant\":%d,\"n\":[\"%s\",\"%s\",\"%s\",\"%s\"],\"mdns\":\"%s\"}",
@@ -208,6 +214,7 @@ void handleState() {
 
 // ── HTTP-Handler: Umschalten ──────────────────────────────────
 void handleSwitch() {
+    actPulse();
     if (server.hasArg("ant")) {
         int val = server.arg("ant").toInt();
         if (val >= 0 && val <= 4) {
@@ -221,11 +228,13 @@ void handleSwitch() {
 
 // ── HTTP-Handler: Einstellungsseite (GET) ─────────────────────
 void handleSettings() {
+    actPulse();
     server.send_P(200, "text/html; charset=utf-8", HTML_SETTINGS);
 }
 
 // ── HTTP-Handler: Einstellungen speichern (POST) ──────────────
 void handleSettingsSave() {
+    actPulse();
     bool changed = false;
     for (int i = 0; i < 4; i++) {
         char key[3] = {'n', (char)('1' + i), '\0'};
@@ -260,18 +269,12 @@ void handleSettingsSave() {
     server.send(200, "application/json", "{\"ok\":true}");
 }
 
-// ── FreeRTOS-Task: WiFi-Status-LED ────────────────────────────
-static void wifiLedTask(void* /*param*/) {
+// ── FreeRTOS-Task: Aktivitäts-LED (150 ms Puls pro Request) ───
+static void actLedTask(void* /*param*/) {
     for (;;) {
-        if (WiFi.status() == WL_CONNECTED) {
-            digitalWrite(LED_WIFI_PIN, HIGH);
-            vTaskDelay(pdMS_TO_TICKS(100));
-        } else {
-            digitalWrite(LED_WIFI_PIN, HIGH);
-            vTaskDelay(pdMS_TO_TICKS(500));
-            digitalWrite(LED_WIFI_PIN, LOW);
-            vTaskDelay(pdMS_TO_TICKS(500));
-        }
+        bool active = (millis() - lastRequestMs) < 150;
+        digitalWrite(LED_ACT_PIN, active ? HIGH : LOW);
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
 
@@ -294,8 +297,8 @@ void setup() {
     }
 
     // WiFi-Status-LED
-    pinMode(LED_WIFI_PIN, OUTPUT);
-    digitalWrite(LED_WIFI_PIN, LOW);
+    pinMode(LED_ACT_PIN, OUTPUT);
+    digitalWrite(LED_ACT_PIN, LOW);
 
     // NVS öffnen und gespeicherte Werte laden
     prefs.begin("ant", false);
@@ -343,7 +346,7 @@ void setup() {
     Serial.println("HTTP-Server gestartet");
 
     xTaskCreatePinnedToCore(relayTask,   "relayTask",   2048, nullptr, 1, nullptr, 1);
-    xTaskCreatePinnedToCore(wifiLedTask, "wifiLedTask", 2048, nullptr, 1, nullptr, 1);
+    xTaskCreatePinnedToCore(actLedTask,  "actLedTask",  2048, nullptr, 1, nullptr, 1);
 }
 
 // ── Loop ──────────────────────────────────────────────────────
