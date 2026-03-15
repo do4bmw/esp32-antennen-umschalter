@@ -22,6 +22,7 @@ static const uint8_t LED_WIFI_PIN   = 23;
 // ── Globaler Zustand ──────────────────────────────────────────
 volatile int8_t activeAntenna = 0;
 char antNames[4][21];   // 4 Namen, max. 20 Zeichen + '\0'
+char mdnsName[33];      // mDNS-Hostname, max. 32 Zeichen + '\0'
 
 Preferences prefs;
 WebServer server(80);
@@ -113,6 +114,11 @@ static const char HTML_SETTINGS[] PROGMEM =
     "<div class='row'><label>Antenne 2</label><input id='n2' maxlength='20'></div>"
     "<div class='row'><label>Antenne 3</label><input id='n3' maxlength='20'></div>"
     "<div class='row'><label>Antenne 4</label><input id='n4' maxlength='20'></div>"
+    "<div class='row' style='margin-top:20px'>"
+    "<label>mDNS-Name <span style='color:#666;font-size:.85em'>(.local)</span></label>"
+    "<input id='mdns' maxlength='32' placeholder='do4bmw-ant'>"
+    "<small style='color:#666;display:block;margin-top:4px'>"
+    "Nur Buchstaben, Zahlen und Bindestriche</small></div>"
     "<button class='btn' onclick='save()'>Speichern</button>"
     "<div id='msg'></div>"
     "<a class='back' href='/'>&#8592; Zurück</a>"
@@ -124,12 +130,14 @@ static const char HTML_SETTINGS[] PROGMEM =
     "<script>"
     "fetch('/state').then(r=>r.json()).then(function(d){"
       "d.n.forEach(function(nm,i){document.getElementById('n'+(i+1)).value=nm;});"
+      "document.getElementById('mdns').value=d.mdns||'';"
     "});"
     "function save(){"
       "var b='n1='+encodeURIComponent(document.getElementById('n1').value)"
           "+'&n2='+encodeURIComponent(document.getElementById('n2').value)"
           "+'&n3='+encodeURIComponent(document.getElementById('n3').value)"
-          "+'&n4='+encodeURIComponent(document.getElementById('n4').value);"
+          "+'&n4='+encodeURIComponent(document.getElementById('n4').value)"
+          "+'&mdns='+encodeURIComponent(document.getElementById('mdns').value);"
       "fetch('/settings',{method:'POST',"
         "headers:{'Content-Type':'application/x-www-form-urlencoded'},body:b})"
       ".then(r=>r.json()).then(function(d){"
@@ -139,8 +147,8 @@ static const char HTML_SETTINGS[] PROGMEM =
     "</script>"
     "</body></html>";
 
-// ── NVS: Namen laden (oder Defaults setzen) ───────────────────
-static void loadNames() {
+// ── NVS: Einstellungen laden (oder Defaults setzen) ───────────
+static void loadSettings() {
     for (int i = 0; i < 4; i++) {
         char key[3] = {'n', (char)('1' + i), '\0'};
         char def[21];
@@ -150,9 +158,13 @@ static void loadNames() {
             strlcpy(antNames[i], def, sizeof(antNames[i]));
         }
     }
+    prefs.getString("mdns", mdnsName, sizeof(mdnsName));
+    if (mdnsName[0] == '\0') {
+        strlcpy(mdnsName, "do4bmw-ant", sizeof(mdnsName));
+    }
 }
 
-// ── NVS: Namen speichern ──────────────────────────────────────
+// ── NVS: Antennennamen speichern ──────────────────────────────
 static void saveNames() {
     for (int i = 0; i < 4; i++) {
         char key[3] = {'n', (char)('1' + i), '\0'};
@@ -184,13 +196,13 @@ void handleRoot() {
     server.send_P(200, "text/html; charset=utf-8", HTML_MAIN);
 }
 
-// ── HTTP-Handler: Zustand + Namen ────────────────────────────
+// ── HTTP-Handler: Zustand + Namen + mDNS ─────────────────────
 void handleState() {
-    char buf[140];
+    char buf[220];
     snprintf(buf, sizeof(buf),
-        "{\"ant\":%d,\"n\":[\"%s\",\"%s\",\"%s\",\"%s\"]}",
+        "{\"ant\":%d,\"n\":[\"%s\",\"%s\",\"%s\",\"%s\"],\"mdns\":\"%s\"}",
         activeAntenna,
-        antNames[0], antNames[1], antNames[2], antNames[3]);
+        antNames[0], antNames[1], antNames[2], antNames[3], mdnsName);
     server.send(200, "application/json", buf);
 }
 
@@ -229,6 +241,22 @@ void handleSettingsSave() {
         }
     }
     if (changed) saveNames();
+
+    // mDNS-Name speichern und sofort neu starten
+    if (server.hasArg("mdns")) {
+        String val = server.arg("mdns");
+        val.trim();
+        if (val.length() > 0 && val.length() <= 32) {
+            strlcpy(mdnsName, val.c_str(), sizeof(mdnsName));
+            prefs.putString("mdns", mdnsName);
+            MDNS.end();
+            if (MDNS.begin(mdnsName)) {
+                MDNS.addService("http", "tcp", 80);
+                Serial.printf("[mDNS] Neuer Name: %s.local\n", mdnsName);
+            }
+        }
+    }
+
     server.send(200, "application/json", "{\"ok\":true}");
 }
 
@@ -271,12 +299,13 @@ void setup() {
 
     // NVS öffnen und gespeicherte Werte laden
     prefs.begin("ant", false);
-    loadNames();
+    loadSettings();
     int8_t lastAnt = prefs.getChar("active", 1);
     Serial.printf("[NVS] Letzte Antenne: %d\n", lastAnt);
     for (int i = 0; i < 4; i++) {
         Serial.printf("[NVS] Name %d: %s\n", i + 1, antNames[i]);
     }
+    Serial.printf("[NVS] mDNS-Name: %s\n", mdnsName);
 
     // WLAN verbinden (max. 30 s)
     WiFi.mode(WIFI_STA);
@@ -289,9 +318,9 @@ void setup() {
     }
     if (WiFi.status() == WL_CONNECTED) {
         Serial.printf("\nIP: %s\n", WiFi.localIP().toString().c_str());
-        if (MDNS.begin("do4bmw-ant")) {
+        if (MDNS.begin(mdnsName)) {
             MDNS.addService("http", "tcp", 80);
-            Serial.println("mDNS: http://do4bmw-ant.local");
+            Serial.printf("mDNS: http://%s.local\n", mdnsName);
         }
     } else {
         Serial.println("\nWiFi-Verbindung fehlgeschlagen – prüfe secrets.ini!");

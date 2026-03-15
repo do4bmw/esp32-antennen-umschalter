@@ -9,7 +9,7 @@ Steuerung über jeden Browser im lokalen Netzwerk – optimiert für Desktop und
 
 - Vier Relais (active HIGH) schalten jeweils eine Antenne aktiv
 - Immer nur ein Relais gleichzeitig aktiv, alle anderen offen
-- Weboberfläche erreichbar per IP oder mDNS-Name **http://do4bmw-ant.local**
+- Weboberfläche erreichbar per IP oder mDNS-Name (Standard: **http://do4bmw-ant.local**)
 - Buttons reagieren sofort per AJAX – kein Seiten-Reload, kein Lag auf iOS
 - Relais-Watchdog (FreeRTOS-Task) stellt den Zustand alle 200 ms erneut sicher
 - WiFi-Status-LED auf GPIO23: blinkt (500 ms) = sucht WLAN, dauerhaft an = verbunden
@@ -77,7 +77,7 @@ Aufruf: `http://do4bmw-ant.local` oder per IP-Adresse (wird beim Start seriell a
 Vier Buttons schalten die Antennen, ein AUS-Button öffnet alle Relais.
 Der aktiv geschaltete Button wird farblich hervorgehoben.
 
-### Einstellungen – Antennennamen anpassen
+### Einstellungen – Antennennamen und mDNS anpassen
 
 Aufruf: `http://do4bmw-ant.local/settings`
 
@@ -88,7 +88,12 @@ Die Namen der vier Antennentasten können frei vergeben werden (max. 20 Zeichen)
 - Antenne 3 → `Vertikal`
 - Antenne 4 → `Beam 10m`
 
-Nach dem Speichern werden die Namen dauerhaft im **NVS (Non-Volatile Storage)** des ESP32 abgelegt und beim nächsten Start automatisch wiederhergestellt.
+Zusätzlich kann der **mDNS-Hostname** (max. 32 Zeichen, nur Buchstaben, Zahlen und Bindestriche) frei vergeben werden.
+Das Board ist danach sofort unter dem neuen Namen erreichbar – ohne Neustart.
+
+> Beispiel: Name `mein-esp` → Adresse `http://mein-esp.local`
+
+Nach dem Speichern werden alle Einstellungen dauerhaft im **NVS (Non-Volatile Storage)** des ESP32 abgelegt und beim nächsten Start automatisch wiederhergestellt.
 
 ---
 
@@ -98,7 +103,8 @@ Der ESP32 speichert folgende Daten dauerhaft im internen Flash (NVS):
 
 | Gespeicherter Wert       | Beschreibung                                      |
 |--------------------------|---------------------------------------------------|
-| Antennennamen (n1–n4)    | Frei vergebene Button-Bezeichnungen               |
+| Antennennamen (n1–n4)    | Frei vergebene Button-Bezeichnungen                       |
+| mDNS-Hostname            | Frei wählbarer `.local`-Name im Netzwerk                  |
 | Zuletzt aktives Relais   | Nach Neustart wird automatisch dasselbe Relais geschaltet |
 
 Das bedeutet: Fällt die Stromversorgung aus oder wird der ESP32 neu gestartet, schaltet er beim Hochfahren sofort wieder auf die zuletzt aktive Antenne – ohne manuellen Eingriff.
@@ -109,7 +115,9 @@ Beim Start wird der wiederhergestellte Zustand seriell ausgegeben (115200 Baud):
 [NVS] Letzte Antenne: 2
 [NVS] Name 1: Yagi 40m
 [NVS] Name 2: Dipol 80m
-...
+[NVS] Name 3: Vertikal
+[NVS] Name 4: Beam 10m
+[NVS] mDNS-Name: do4bmw-ant
 [Relais] Dipol 80m aktiv (GPIO 33 HIGH)
 ```
 
@@ -117,7 +125,9 @@ Beim Start wird der wiederhergestellte Zustand seriell ausgegeben (115200 Baud):
 
 ## mDNS
 
-Das Board meldet sich im Netzwerk unter dem Namen **do4bmw-ant.local**.
+Das Board meldet sich im Netzwerk standardmäßig unter **do4bmw-ant.local**.
+Der Name kann jederzeit über die Einstellungsseite (`/settings`) geändert und dauerhaft gespeichert werden – die Änderung ist sofort aktiv, kein Neustart nötig.
+
 Funktioniert direkt unter macOS und iOS. Unter Windows 10/11 wird der mDNS-Dienst von modernen Browsern (Edge, Chrome) nativ unterstützt.
 
 ---
