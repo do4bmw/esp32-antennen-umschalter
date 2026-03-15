@@ -26,6 +26,12 @@ Steuerung über jeden Browser im lokalen Netzwerk – optimiert für Desktop und
 
 ---
 
+## Video
+
+[![YouTube Video](https://img.youtube.com/vi/UB6Tlh_ZC4s/maxresdefault.jpg)](https://www.youtube.com/watch?v=UB6Tlh_ZC4s)
+
+---
+
 ## Installation
 
 ### Voraussetzungen
