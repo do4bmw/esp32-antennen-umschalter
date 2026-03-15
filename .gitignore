@@ -1,0 +1,9 @@
+# WiFi-Zugangsdaten – niemals einchecken!
+secrets.ini
+
+# PlatformIO Build-Verzeichnis
+.pio/
+
+# IDE
+.vscode/
+.idea/
